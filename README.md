@@ -25,7 +25,9 @@
 17. [Visual System & Animations](#visual-system--animations)
 18. [Controls Reference](#controls-reference)
 19. [Data Persistence](#data-persistence)
-20. [Architecture Overview](#architecture-overview)
+20. [Flowchart](#flowchart)
+21. [Algorithm](#algorithm)
+22. [Architecture Overview](#architecture-overview)
 
 ---
 
@@ -446,6 +448,355 @@ A binary file written in the game's working directory.
 - On level up (stored lives updated mid-game)
 
 > ⚠️ **Important:** If the `UserProfile` struct is changed (fields added/removed), existing `users.dat` files will be **incompatible** and must be deleted before running the updated binary.
+
+---
+
+## Flowchart
+
+The diagrams below capture the complete lifecycle of the game — from the moment the binary is launched to the point where the player exits.
+
+### 1. Overall Application Flow
+
+```mermaid
+flowchart TD
+    A([▶ Launch fish_game]) --> B[setup\nncurses init]
+    B --> C[load_users\nread users.dat]
+    C --> D{{"[Outer Loop]\nLogin Screen"}}
+    D --> E[Enter 4-letter ID]
+    E --> F{ID valid?\n4 alpha chars}
+    F -- No --> E
+    F -- Yes --> G[get_or_create_user]
+    G --> H{{"[Inner Loop]\nMain Menu"}}
+    H --> H1[Life Regen Check]
+    H1 --> H2{Choose Option}
+    H2 -- Play Game --> I1[select_difficulty]
+    H2 -- Level Grid --> I2[show_level_grid\nselect_difficulty]
+    H2 -- Leaderboard --> I3[show_leaderboard]
+    H2 -- Logout --> D
+    H2 -- Quit --> Z([endwin + exit])
+    I1 --> J[play_game\nstart_level=1]
+    I2 --> J
+    J --> K{Game Result}
+    K -- Retry R --> J
+    K -- Menu M --> H
+    I3 --> H
+```
+
+---
+
+### 2. Game Loop Frame Cycle
+
+```mermaid
+flowchart TD
+    START([Enter play_game]) --> INIT[Init variables\nlives, score, speed, timers]
+    INIT --> LOOP{game_over == 0?}
+    LOOP -- No --> GOVER[Game Over Sequence]
+    GOVER --> SAVE[save_users]
+    SAVE --> RET{R or M?}
+    RET -- R Retry --> LOOP
+    RET -- M Menu --> END([Return to Main Menu])
+
+    LOOP -- Yes --> T1[Tick frame counter\nDecrement level timer]
+    T1 --> T2{Timer == 0?}
+    T2 -- Yes --> L1[lives--]
+    L1 --> L2{lives == 0?}
+    L2 -- Yes --> LOOP
+    L2 -- No --> T3[Reset level timer]
+    T2 -- No --> T3
+
+    T3 --> PU[Update power-up\n& status timers]
+    PU --> BUB[Spawn & move\nambient bubbles]
+    BUB --> POP[Float score\npopups]
+    POP --> INP[Process input\ndx accumulation]
+    INP --> MOVE[Move basket\nclamp to bounds]
+    MOVE --> SPAWN[Spawn entity\nif rand mod 10 == 0]
+    SPAWN --> ENT[Update entities\nmove / magnet / wiggle]
+    ENT --> COL[Collision detection\n@ max_y - 2]
+    COL --> SCR[Score / life / power-up\napply effects]
+    SCR --> LVL{score >= level*100?}
+    LVL -- Yes --> LVLUP[Level Up!\nspeed++ biome change\nlives++ timer reset]
+    LVL -- No --> RENDER
+    LVLUP --> RENDER[Render frame\nHUD + entities + basket]
+    RENDER --> SLEEP[usleep speed]
+    SLEEP --> LOOP
+```
+
+---
+
+### 3. Collision & Scoring Decision Tree
+
+```mermaid
+flowchart TD
+    A[Entity reaches\nmax_y - 2] --> B{In basket range?\nx within player_x ± width}
+    B -- No: Missed --> C{Good item?\nfish / starfish / goldfish}
+    C -- Yes --> D[combo = 0\nSplash popup]
+    C -- No --> D2[No penalty]
+    B -- Yes: Caught --> E{Entity Type}
+    E -- Fish --> F["pts = (10 + combo) × multiplier\nscore += pts\ncombo++"]
+    E -- Starfish --> G["pts = (50 + combo×2) × multiplier\nscore += pts\ncombo++"]
+    E -- Gold Fish --> H["pts = (200 + combo×5) × multiplier\nscore += pts\ncombo++"]
+    E -- Bomb --> I{Shield active?}
+    I -- Yes --> I1[Shield consumed]
+    I -- No --> I2[lives--\ncombo = 0]
+    I2 --> I3{lives == 0?}
+    I3 -- Yes --> GO([Game Over])
+    E -- Sea Mine --> J[lives -= 2\nscore -= 500\nShield broken\ncombo = 0]
+    J --> J2{lives <= 0?}
+    J2 -- Yes --> GO
+    E -- Jellyfish --> K[combo = 0\nparalyze_timer = 40]
+    E -- Shark contact --> L[lives = 0\nGame Over instantly]
+    E -- Power-Up --> M[powerup_timer = 150\nBasket widens]
+    E -- Shield --> N[shield_active = 1]
+    E -- Slow Motion --> O[slowmo_timer = 200\nusleep × 2]
+    E -- Magnet --> P[magnet_timer = 200\nfish pulled toward basket]
+    E -- Score x2 --> Q[multiplier_timer = 200\nall points doubled]
+```
+
+---
+
+### 4. User Authentication Flow
+
+```mermaid
+flowchart TD
+    A([Login Screen]) --> B[Display ID prompt]
+    B --> C[Read keypress]
+    C --> D{Key type?}
+    D -- Alpha char & len < 4 --> E[Append toupper char]
+    D -- Backspace & len > 0 --> F[Remove last char]
+    D -- Enter & len == 4 --> G[Call get_or_create_user]
+    D -- Other --> B
+    E --> B
+    F --> B
+    G --> H{ID exists\nin users array?}
+    H -- Yes --> I[Return existing profile]
+    H -- No --> J[Create new profile\nlives=3, score=0, level=1]
+    J --> K[save_users to users.dat]
+    K --> I
+    I --> L([Return to Main Menu])
+```
+
+---
+
+## Algorithm
+
+The following pseudocode describes the six core algorithms that power Hungry Fish.
+
+---
+
+### Algorithm 1 — Main Game Loop
+
+```
+FUNCTION play_game(user, start_level, difficulty):
+    INIT speed, lives, score, combo, timers FROM difficulty & start_level
+    INIT entity_pool[12], bubble_pool[20], popup_pool[10]
+
+    WHILE NOT game_over:
+        frame_count += 1
+
+        // --- Timer Tick ---
+        IF frame_count >= (1_000_000 / speed):
+            frame_count = 0
+            level_secs_left -= 1
+            total_secs += 1
+            IF level_secs_left <= 0:
+                lives -= 1
+                IF lives <= 0: game_over = TRUE
+                ELSE: level_secs_left = level_time_limit
+
+        // --- Power-up Countdowns ---
+        DECREMENT all active timers (powerup, slowmo, magnet, dash, paralyze, multiplier)
+        IF powerup_timer > 0: basket_width = 11 ELSE: basket_width = 5
+
+        // --- Ambient Effects ---
+        SPAWN bubble at random x with probability 1/4
+        FOR each bubble: move up (y--), drift x ±1, deactivate if y < 0
+        FOR each popup:  float up every 2 frames, decrement life
+
+        // --- Input ---
+        dx = 0
+        FOR each pending keypress:
+            IF 'Q': game_over = TRUE
+            IF 'P': enter pause loop (blocking getch)
+            IF NOT paralyzed:
+                'A'/LEFT  → dx -= basket_speed; last_dir = -1
+                'D'/RIGHT → dx += basket_speed; last_dir = +1
+                SPACE     → IF dash ready: dx += last_dir * 25; dash_cooldown = 40
+        CLAMP dx to [-30, 30]
+        player_x += dx
+        CLAMP player_x to [0, max_x - basket_width - 1]
+
+        // --- Spawn Entity ---
+        IF rand() % 10 == 0:
+            FIND first inactive slot in entity_pool
+            r = rand() % 100
+            SELECT type FROM weighted loot table (see Entities section)
+            SET entity.active = 1
+
+        // --- Update Entities & Collision ---
+        FOR each active entity:
+            IF shark: move horizontally; check horizontal collision → instant game over
+            ELSE:
+                IF magnet active AND entity is fish/starfish/goldfish:
+                    pull entity.x toward basket center
+                IF jellyfish: wiggle x randomly
+                entity.y += 1
+                IF entity.y >= max_y - 2:
+                    IF entity.x in [player_x - 2 .. player_x + basket_width]:
+                        APPLY caught effect (score, life, power-up)
+                        IF caught good item: combo += 1
+                    ELSE:
+                        IF good item: combo = 0
+                    entity.active = 0
+
+        // --- Level Up Check ---
+        IF score >= level * 100:
+            score += level_secs_left * 5  (time bonus)
+            level += 1
+            lives += 1
+            speed -= 2000 (minimum 15000)
+            basket_speed += 1
+            level_time_limit = MAX(base_time - (level-1)*5, 15)
+            level_secs_left = level_time_limit
+            update_environment(level)
+
+        // --- Render ---
+        erase()
+        DRAW bubbles, HUD, power-up status bars, level-up splash, popups, entities, basket
+        refresh()
+        usleep(slowmo active ? speed*2 : speed)
+
+    // --- Game Over ---
+    Flash "GAME OVER!" 6 times
+    Display final score, level, time survived
+    UPDATE user profile (high_score, max_level, best_time, stored_lives)
+    save_users()
+    WAIT for R (retry → return 1) or M (menu → return 0)
+```
+
+---
+
+### Algorithm 2 — Entity Spawning (Weighted Loot Table)
+
+```
+FUNCTION spawn_entity(entity_pool, level):
+    FOR i = 0 TO 11:
+        IF entity_pool[i].active == 0:
+            entity_pool[i].x = rand() % (max_x - 4)
+            entity_pool[i].y = 1
+            r = rand() % 100
+
+            IF   r < 40:  type = FISH
+            ELIF r < 55:  type = STARFISH
+            ELIF r < 65:  type = JELLYFISH
+            ELIF r < 80:
+                r2 = rand() % 10
+                IF   level >= 8 AND r2 < 2:
+                    type = SHARK
+                    y = max_y - 3 - rand()%5   // near floor
+                    dir = random ±1
+                    x = (dir == 1) ? 0 : max_x - 5
+                ELIF level >= 4 AND r2 < 5: type = MINE
+                ELSE:                        type = BOMB
+            ELIF r < 86:  type = POWERUP       (Wide Basket)
+            ELIF r < 90:  type = SHIELD
+            ELIF r < 93:  type = SLOWMO
+            ELIF r < 95:  type = MAGNET
+            ELIF r < 97:  type = MULTIPLIER
+            ELSE:          type = GOLD_FISH     (rarest, highest value)
+
+            entity_pool[i].active = 1
+            BREAK
+```
+
+---
+
+### Algorithm 3 — Collision Detection
+
+```
+FUNCTION check_collision(entity, player_x, basket_width, max_y):
+    IF entity.type == SHARK:
+        IF entity.x IN [player_x - 4 .. player_x + basket_width + 4]
+           AND entity.y >= max_y - 4:
+            RETURN "shark_hit"   // instant game over
+        RETURN "no_hit"
+
+    IF entity.y >= max_y - 2:
+        IF entity.x >= player_x - 2
+           AND entity.x <= player_x + basket_width:
+            RETURN "caught"
+        ELSE:
+            RETURN "missed"
+    RETURN "in_flight"
+```
+
+---
+
+### Algorithm 4 — Combo & Score Calculation
+
+```
+FUNCTION calculate_score(entity_type, combo, multiplier_active):
+    mult = 2 IF multiplier_active ELSE 1
+
+    SWITCH entity_type:
+        FISH:      pts = (10  + combo)     × mult
+        STARFISH:  pts = (50  + combo × 2) × mult
+        GOLD_FISH: pts = (200 + combo × 5) × mult
+        OTHER:     pts = 0
+
+    IF pts > 0:
+        combo += 1
+    RETURN pts
+```
+
+---
+
+### Algorithm 5 — Level Progression
+
+```
+FUNCTION check_level_up(score, level, lives, speed, basket_speed,
+                         base_time, level_secs_left):
+    IF score >= level * 100:
+        time_bonus    = level_secs_left * 5
+        score        += time_bonus
+        level        += 1
+        lives        += 1
+        speed         = MAX(speed - 2000, 15000)
+        basket_speed += 1
+        level_time_limit = MAX(base_time - (level - 1) * 5, 15)
+        level_secs_left  = level_time_limit
+        update_environment(level)
+        user.max_level = MAX(user.max_level, level)
+        save_users()
+        DISPLAY "LEVEL UP!" flash for 40 frames
+```
+
+---
+
+### Algorithm 6 — Life Regeneration
+
+```
+FUNCTION regen_lives(user):
+    REGEN_SECS = 300     // 5 minutes
+    MAX_LIVES  = 5
+
+    now     = current Unix timestamp
+    elapsed = now - user.last_life_regen
+    to_add  = elapsed / REGEN_SECS       // integer division
+
+    IF user.stored_lives < MAX_LIVES AND to_add > 0:
+        user.stored_lives += to_add
+        IF user.stored_lives > MAX_LIVES:
+            user.stored_lives = MAX_LIVES
+        user.last_life_regen += to_add * REGEN_SECS
+        save_users()
+
+    // HUD countdown
+    secs_until_next = REGEN_SECS - (now - user.last_life_regen)
+    IF user.stored_lives >= MAX_LIVES:
+        DISPLAY "Lives full!"
+    ELSE:
+        DISPLAY "Next life in: MM:SS" using secs_until_next
+```
 
 ---
 
