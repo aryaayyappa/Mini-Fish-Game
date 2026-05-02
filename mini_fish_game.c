@@ -212,7 +212,7 @@ int main() {
         }
     }
 
-    // --- 2. Handle Input ---
+    // --- 2. Handle Input ----
     // Process all pending inputs to avoid input lag and improve responsiveness
     int ch;
     int dx = 0;
