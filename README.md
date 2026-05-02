@@ -76,7 +76,7 @@ You need the `ncurses` development library installed.
 
 ### Compile
 ```bash
-gcc -o fish_game /path/to/gemini-code-1777621178639.c -lncurses
+gcc -o fish_game /path/to/(enteryourdownloadfilepath!).c -lncurses
 ```
 The `-lncurses` flag links the ncurses library at compile time.
 
