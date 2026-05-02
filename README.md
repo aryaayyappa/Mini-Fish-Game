@@ -455,30 +455,39 @@ A binary file written in the game's working directory.
 
 The diagrams below capture the complete lifecycle of the game — from the moment the binary is launched to the point where the player exits.
 
+> **Colour key:** 🟢 Start / End &nbsp;|&nbsp; 🔵 Process &nbsp;|&nbsp; 🟡 Decision &nbsp;|&nbsp; 🟠 Loop / State &nbsp;|&nbsp; 🔴 Game Over / Exit
+
+---
+
 ### 1. Overall Application Flow
 
 ```mermaid
-flowchart TD
-    A([▶ Launch fish_game]) --> B[setup\nncurses init]
-    B --> C[load_users\nread users.dat]
-    C --> D{{"[Outer Loop]\nLogin Screen"}}
-    D --> E[Enter 4-letter ID]
-    E --> F{ID valid?\n4 alpha chars}
+flowchart LR
+    classDef terminal fill:#2d6a4f,color:#fff,stroke:#1b4332,rx:20
+    classDef process  fill:#1d3557,color:#fff,stroke:#457b9d
+    classDef decision fill:#e9c46a,color:#333,stroke:#f4a261
+    classDef loop     fill:#e76f51,color:#fff,stroke:#c1440e
+    classDef exit     fill:#c1121f,color:#fff,stroke:#780000,rx:20
+
+    A([▶ Launch]):::terminal --> B[setup\nncurses init]:::process
+    B --> C[load_users\nread users.dat]:::process
+    C --> D{{"Outer Loop\nLogin Screen"}}:::loop
+    D --> E[Enter 4-letter ID]:::process
+    E --> F{ID valid?\n4 alpha chars}:::decision
     F -- No --> E
-    F -- Yes --> G[get_or_create_user]
-    G --> H{{"[Inner Loop]\nMain Menu"}}
-    H --> H1[Life Regen Check]
-    H1 --> H2{Choose Option}
-    H2 -- Play Game --> I1[select_difficulty]
-    H2 -- Level Grid --> I2[show_level_grid\nselect_difficulty]
-    H2 -- Leaderboard --> I3[show_leaderboard]
+    F -- Yes --> G[get_or_create_user]:::process
+    G --> H{{"Inner Loop\nMain Menu"}}:::loop
+    H --> H1[Life Regen Check]:::process
+    H1 --> H2{Choose Option}:::decision
+    H2 -- Play Game --> I1[select_difficulty]:::process
+    H2 -- Level Grid --> I2[show_level_grid\n+ difficulty]:::process
+    H2 -- Leaderboard --> I3[show_leaderboard]:::process
     H2 -- Logout --> D
-    H2 -- Quit --> Z([endwin + exit])
-    I1 --> J[play_game\nstart_level=1]
+    H2 -- Quit --> Z([endwin + exit]):::exit
+    I1 --> J{{"play_game\nGame Loop"}}:::loop
     I2 --> J
-    J --> K{Game Result}
-    K -- Retry R --> J
-    K -- Menu M --> H
+    J -- Retry R --> J
+    J -- Menu M --> H
     I3 --> H
 ```
 
@@ -488,36 +497,41 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    START([Enter play_game]) --> INIT[Init variables\nlives, score, speed, timers]
-    INIT --> LOOP{game_over == 0?}
-    LOOP -- No --> GOVER[Game Over Sequence]
-    GOVER --> SAVE[save_users]
-    SAVE --> RET{R or M?}
-    RET -- R Retry --> LOOP
-    RET -- M Menu --> END([Return to Main Menu])
+    classDef terminal fill:#2d6a4f,color:#fff,stroke:#1b4332,rx:20
+    classDef process  fill:#1d3557,color:#fff,stroke:#457b9d
+    classDef decision fill:#e9c46a,color:#333,stroke:#f4a261
+    classDef danger   fill:#c1121f,color:#fff,stroke:#780000
 
-    LOOP -- Yes --> T1[Tick frame counter\nDecrement level timer]
-    T1 --> T2{Timer == 0?}
-    T2 -- Yes --> L1[lives--]
-    L1 --> L2{lives == 0?}
+    START([Enter play_game]):::terminal --> INIT[Init: lives, score\nspeed, combo, timers]:::process
+    INIT --> LOOP{game_over?}:::decision
+    LOOP -- Yes --> GOVER[Flash GAME OVER!\n6 times]:::danger
+    GOVER --> SAVE[Update profile\nsave_users]:::process
+    SAVE --> RET{R or M?}:::decision
+    RET -- R Retry --> LOOP
+    RET -- M Menu --> END([Return to Menu]):::terminal
+
+    LOOP -- No --> T1[Tick frame counter\nDecrement timer]:::process
+    T1 --> T2{Timer == 0?}:::decision
+    T2 -- Yes --> L1[lives--]:::danger
+    L1 --> L2{lives == 0?}:::decision
     L2 -- Yes --> LOOP
-    L2 -- No --> T3[Reset level timer]
+    L2 -- No --> T3[Reset level timer]:::process
     T2 -- No --> T3
 
-    T3 --> PU[Update power-up\n& status timers]
-    PU --> BUB[Spawn & move\nambient bubbles]
-    BUB --> POP[Float score\npopups]
-    POP --> INP[Process input\ndx accumulation]
-    INP --> MOVE[Move basket\nclamp to bounds]
-    MOVE --> SPAWN[Spawn entity\nif rand mod 10 == 0]
-    SPAWN --> ENT[Update entities\nmove / magnet / wiggle]
-    ENT --> COL[Collision detection\n@ max_y - 2]
-    COL --> SCR[Score / life / power-up\napply effects]
-    SCR --> LVL{score >= level*100?}
-    LVL -- Yes --> LVLUP[Level Up!\nspeed++ biome change\nlives++ timer reset]
+    T3 --> PU[Decrement power-up\n& status timers]:::process
+    PU --> BUB[Spawn & move\nambient bubbles]:::process
+    BUB --> POP[Float score\npopups upward]:::process
+    POP --> INP[Process all\nkeypresses: dx]:::process
+    INP --> MOVE[Move basket\nclamp to bounds]:::process
+    MOVE --> SPAWN[Spawn entity\nrand mod 10 == 0]:::process
+    SPAWN --> ENT[Update entities\nmagnet / wiggle / fall]:::process
+    ENT --> COL[Collision check\nat max_y - 2]:::process
+    COL --> SCR[Apply effects\nscore / life / power-up]:::process
+    SCR --> LVL{score >= level×100?}:::decision
+    LVL -- Yes --> LVLUP[Level Up!\nspeed+ lives+ biome]:::process
     LVL -- No --> RENDER
-    LVLUP --> RENDER[Render frame\nHUD + entities + basket]
-    RENDER --> SLEEP[usleep speed]
+    LVLUP --> RENDER[Render: bubbles\nHUD, entities, basket]:::process
+    RENDER --> SLEEP[usleep speed\nor speed×2 slow-mo]:::process
     SLEEP --> LOOP
 ```
 
@@ -527,29 +541,38 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Entity reaches\nmax_y - 2] --> B{In basket range?\nx within player_x ± width}
-    B -- No: Missed --> C{Good item?\nfish / starfish / goldfish}
-    C -- Yes --> D[combo = 0\nSplash popup]
-    C -- No --> D2[No penalty]
-    B -- Yes: Caught --> E{Entity Type}
-    E -- Fish --> F["pts = (10 + combo) × multiplier\nscore += pts\ncombo++"]
-    E -- Starfish --> G["pts = (50 + combo×2) × multiplier\nscore += pts\ncombo++"]
-    E -- Gold Fish --> H["pts = (200 + combo×5) × multiplier\nscore += pts\ncombo++"]
-    E -- Bomb --> I{Shield active?}
-    I -- Yes --> I1[Shield consumed]
-    I -- No --> I2[lives--\ncombo = 0]
-    I2 --> I3{lives == 0?}
-    I3 -- Yes --> GO([Game Over])
-    E -- Sea Mine --> J[lives -= 2\nscore -= 500\nShield broken\ncombo = 0]
-    J --> J2{lives <= 0?}
+    classDef process  fill:#1d3557,color:#fff,stroke:#457b9d
+    classDef decision fill:#e9c46a,color:#333,stroke:#f4a261
+    classDef good     fill:#2d6a4f,color:#fff,stroke:#1b4332
+    classDef bad      fill:#c1121f,color:#fff,stroke:#780000
+    classDef powerup  fill:#6a0572,color:#fff,stroke:#3d0140
+    classDef terminal fill:#c1121f,color:#fff,stroke:#780000,rx:20
+
+    A[Entity at basket row]:::process --> B{Inside basket?\nplayer_x ± width}:::decision
+    B -- Missed --> C{Good item?}:::decision
+    C -- Yes --> D[combo reset\nSplash popup]:::bad
+    C -- No --> D2[No penalty]:::process
+
+    B -- Caught --> E{Entity Type}:::decision
+    E -- Fish --> F["pts=(10+combo)×mult\ncombo++"]:::good
+    E -- Starfish --> G["pts=(50+combo×2)×mult\ncombo++"]:::good
+    E -- Gold Fish --> H["pts=(200+combo×5)×mult\ncombo++"]:::good
+    E -- Bomb --> I{Shield on?}:::decision
+    I -- Yes --> I1[Shield consumed]:::powerup
+    I -- No --> I2[lives--\ncombo=0]:::bad
+    I2 --> I3{lives==0?}:::decision
+    I3 -- Yes --> GO([GAME OVER]):::terminal
+    E -- Sea Mine --> J[lives-=2, score-=500\nShield broken, combo=0]:::bad
+    J --> J2{lives<=0?}:::decision
     J2 -- Yes --> GO
-    E -- Jellyfish --> K[combo = 0\nparalyze_timer = 40]
-    E -- Shark contact --> L[lives = 0\nGame Over instantly]
-    E -- Power-Up --> M[powerup_timer = 150\nBasket widens]
-    E -- Shield --> N[shield_active = 1]
-    E -- Slow Motion --> O[slowmo_timer = 200\nusleep × 2]
-    E -- Magnet --> P[magnet_timer = 200\nfish pulled toward basket]
-    E -- Score x2 --> Q[multiplier_timer = 200\nall points doubled]
+    E -- Jellyfish --> K[combo=0\nparalyze 40 frames]:::bad
+    E -- Shark --> L[lives=0\nInstant Game Over]:::bad
+    L --> GO
+    E -- Wide Basket --> M[powerup_timer=150\nbasket widens]:::powerup
+    E -- Shield --> N[shield_active=1]:::powerup
+    E -- Slow-Mo --> O[slowmo_timer=200\nusleep×2]:::powerup
+    E -- Magnet --> P[magnet_timer=200\nfish attracted]:::powerup
+    E -- Score x2 --> Q[multiplier_timer=200\nall pts doubled]:::powerup
 ```
 
 ---
@@ -557,246 +580,197 @@ flowchart TD
 ### 4. User Authentication Flow
 
 ```mermaid
-flowchart TD
-    A([Login Screen]) --> B[Display ID prompt]
-    B --> C[Read keypress]
-    C --> D{Key type?}
-    D -- Alpha char & len < 4 --> E[Append toupper char]
-    D -- Backspace & len > 0 --> F[Remove last char]
-    D -- Enter & len == 4 --> G[Call get_or_create_user]
+flowchart LR
+    classDef terminal fill:#2d6a4f,color:#fff,stroke:#1b4332,rx:20
+    classDef process  fill:#1d3557,color:#fff,stroke:#457b9d
+    classDef decision fill:#e9c46a,color:#333,stroke:#f4a261
+    classDef save     fill:#6a0572,color:#fff,stroke:#3d0140
+
+    A([Login Screen]):::terminal --> B[Display\nID prompt]:::process
+    B --> C[Read keypress]:::process
+    C --> D{Key type?}:::decision
+    D -- "Alpha & len<4" --> E[Append\ntoupper char]:::process
+    D -- "Backspace & len>0" --> F[Remove\nlast char]:::process
+    D -- "Enter & len==4" --> G[get_or_create_user]:::process
     D -- Other --> B
     E --> B
     F --> B
-    G --> H{ID exists\nin users array?}
-    H -- Yes --> I[Return existing profile]
-    H -- No --> J[Create new profile\nlives=3, score=0, level=1]
-    J --> K[save_users to users.dat]
+    G --> H{ID found in\nusers array?}:::decision
+    H -- Yes --> I[Load existing profile]:::process
+    H -- No --> J[Create new profile\nlives=3 score=0 level=1]:::process
+    J --> K[save_users\nwrite users.dat]:::save
     K --> I
-    I --> L([Return to Main Menu])
+    I --> L([Enter Main Menu]):::terminal
 ```
 
 ---
 
 ## Algorithm
 
-The following pseudocode describes the six core algorithms that power Hungry Fish.
+The following section breaks down each core system of Hungry Fish into clear, numbered steps.
 
 ---
 
 ### Algorithm 1 — Main Game Loop
 
-```
-FUNCTION play_game(user, start_level, difficulty):
-    INIT speed, lives, score, combo, timers FROM difficulty & start_level
-    INIT entity_pool[12], bubble_pool[20], popup_pool[10]
+**Step 1:** Initialize all variables from difficulty and start level:
+- `speed` (frame delay in µs), `lives` (from user profile), `score = 0`, `combo = 0`
+- Allocate `entity_pool[12]`, `bubble_pool[20]`, `popup_pool[10]`
 
-    WHILE NOT game_over:
-        frame_count += 1
+**Step 2:** Enter the main `while (!game_over)` loop.
 
-        // --- Timer Tick ---
-        IF frame_count >= (1_000_000 / speed):
-            frame_count = 0
-            level_secs_left -= 1
-            total_secs += 1
-            IF level_secs_left <= 0:
-                lives -= 1
-                IF lives <= 0: game_over = TRUE
-                ELSE: level_secs_left = level_time_limit
+**Step 3 — Timer Tick:** Increment `frame_count`. When `frame_count >= (1,000,000 / speed)`:
+- Reset `frame_count = 0`, decrement `level_secs_left`, increment `total_secs`
+- If `level_secs_left <= 0`: decrement `lives`. If `lives == 0` → game over. Else reset timer.
 
-        // --- Power-up Countdowns ---
-        DECREMENT all active timers (powerup, slowmo, magnet, dash, paralyze, multiplier)
-        IF powerup_timer > 0: basket_width = 11 ELSE: basket_width = 5
+**Step 4 — Power-up Countdowns:** Decrement all active timers (powerup, slowmo, magnet, dash, paralyze, multiplier). Set `basket_width = 11` if powerup active, else `5`.
 
-        // --- Ambient Effects ---
-        SPAWN bubble at random x with probability 1/4
-        FOR each bubble: move up (y--), drift x ±1, deactivate if y < 0
-        FOR each popup:  float up every 2 frames, decrement life
+**Step 5 — Ambient Effects:**
+- With 1-in-4 chance, spawn a new bubble at random x at the screen bottom
+- Move all active bubbles upward (`y--`), drift x by ±1, deactivate if `y < 0`
+- Float active popups upward every 2 frames; decrement their lifetime
 
-        // --- Input ---
-        dx = 0
-        FOR each pending keypress:
-            IF 'Q': game_over = TRUE
-            IF 'P': enter pause loop (blocking getch)
-            IF NOT paralyzed:
-                'A'/LEFT  → dx -= basket_speed; last_dir = -1
-                'D'/RIGHT → dx += basket_speed; last_dir = +1
-                SPACE     → IF dash ready: dx += last_dir * 25; dash_cooldown = 40
-        CLAMP dx to [-30, 30]
-        player_x += dx
-        CLAMP player_x to [0, max_x - basket_width - 1]
+**Step 6 — Process Input:** Drain the input queue:
+- `Q` → set `game_over = TRUE`
+- `P` → enter blocking pause loop
+- If not paralyzed: `A/LEFT` subtracts from `dx`; `D/RIGHT` adds; `SPACE` triggers dash
+- Clamp `dx` to `[-30, 30]`, apply to `player_x`, clamp `player_x` to screen bounds
 
-        // --- Spawn Entity ---
-        IF rand() % 10 == 0:
-            FIND first inactive slot in entity_pool
-            r = rand() % 100
-            SELECT type FROM weighted loot table (see Entities section)
-            SET entity.active = 1
+**Step 7 — Spawn Entity:** If `rand() % 10 == 0`, find the first inactive slot in `entity_pool` and assign a type using the weighted loot table (see Algorithm 2).
 
-        // --- Update Entities & Collision ---
-        FOR each active entity:
-            IF shark: move horizontally; check horizontal collision → instant game over
-            ELSE:
-                IF magnet active AND entity is fish/starfish/goldfish:
-                    pull entity.x toward basket center
-                IF jellyfish: wiggle x randomly
-                entity.y += 1
-                IF entity.y >= max_y - 2:
-                    IF entity.x in [player_x - 2 .. player_x + basket_width]:
-                        APPLY caught effect (score, life, power-up)
-                        IF caught good item: combo += 1
-                    ELSE:
-                        IF good item: combo = 0
-                    entity.active = 0
+**Step 8 — Update Entities:**
+- Sharks: move horizontally, check proximity collision → instant game over
+- Others: apply magnet pull if active; wiggle jellyfish; increment `y`
+- If entity reaches `max_y - 2`: run collision check (see Algorithm 3)
 
-        // --- Level Up Check ---
-        IF score >= level * 100:
-            score += level_secs_left * 5  (time bonus)
-            level += 1
-            lives += 1
-            speed -= 2000 (minimum 15000)
-            basket_speed += 1
-            level_time_limit = MAX(base_time - (level-1)*5, 15)
-            level_secs_left = level_time_limit
-            update_environment(level)
+**Step 9 — Level Up Check:** If `score >= level * 100`:
+- Award time bonus, increment level and lives, increase speed and basket speed
+- Recalculate time limit, reset timer, call `update_environment(level)`
 
-        // --- Render ---
-        erase()
-        DRAW bubbles, HUD, power-up status bars, level-up splash, popups, entities, basket
-        refresh()
-        usleep(slowmo active ? speed*2 : speed)
+**Step 10 — Render Frame:** Call `erase()`, draw bubbles → HUD → power-up bars → level-up splash → popups → entities → basket → `refresh()`.
 
-    // --- Game Over ---
-    Flash "GAME OVER!" 6 times
-    Display final score, level, time survived
-    UPDATE user profile (high_score, max_level, best_time, stored_lives)
-    save_users()
-    WAIT for R (retry → return 1) or M (menu → return 0)
-```
+**Step 11 — Frame Rate Control:** Call `usleep(speed * 2)` if slow-motion active, else `usleep(speed)`. Go to Step 2.
+
+**Step 12 — Game Over Sequence:** Flash "GAME OVER!" 6 times. Display final score, level, time survived. Update and save user profile. Wait for `R` (retry) or `M` (menu).
 
 ---
 
 ### Algorithm 2 — Entity Spawning (Weighted Loot Table)
 
-```
-FUNCTION spawn_entity(entity_pool, level):
-    FOR i = 0 TO 11:
-        IF entity_pool[i].active == 0:
-            entity_pool[i].x = rand() % (max_x - 4)
-            entity_pool[i].y = 1
-            r = rand() % 100
+**Step 1:** On each frame, check if `rand() % 10 == 0`. If not, skip spawning.
 
-            IF   r < 40:  type = FISH
-            ELIF r < 55:  type = STARFISH
-            ELIF r < 65:  type = JELLYFISH
-            ELIF r < 80:
-                r2 = rand() % 10
-                IF   level >= 8 AND r2 < 2:
-                    type = SHARK
-                    y = max_y - 3 - rand()%5   // near floor
-                    dir = random ±1
-                    x = (dir == 1) ? 0 : max_x - 5
-                ELIF level >= 4 AND r2 < 5: type = MINE
-                ELSE:                        type = BOMB
-            ELIF r < 86:  type = POWERUP       (Wide Basket)
-            ELIF r < 90:  type = SHIELD
-            ELIF r < 93:  type = SLOWMO
-            ELIF r < 95:  type = MAGNET
-            ELIF r < 97:  type = MULTIPLIER
-            ELSE:          type = GOLD_FISH     (rarest, highest value)
+**Step 2:** Scan `entity_pool[0..11]` for the first slot where `active == 0`.
 
-            entity_pool[i].active = 1
-            BREAK
-```
+**Step 3:** Set `entity.x = rand() % (max_x - 4)`, `entity.y = 1`.
+
+**Step 4:** Roll `r = rand() % 100` and select type from the table below:
+
+| Roll | Type | Probability |
+|------|------|-------------|
+| 0–39 | Fish | 40% |
+| 40–54 | Starfish | 15% |
+| 55–64 | Jellyfish | 10% |
+| 65–79 | Bomb / Mine / Shark | 15% (level-scaled) |
+| 80–85 | Wide Basket | 6% |
+| 86–89 | Shield | 4% |
+| 90–92 | Slow Motion | 3% |
+| 93–94 | Magnet | 2% |
+| 95–96 | Score x2 | 2% |
+| 97–99 | Gold Fish | 3% |
+
+**Step 5:** For the hazard band (65–79), roll `r2 = rand() % 10`:
+- If `level >= 8` and `r2 < 2` → **Shark** (spawn near floor, random direction)
+- If `level >= 4` and `r2 < 5` → **Mine**
+- Otherwise → **Bomb**
+
+**Step 6:** Set `entity.active = 1` and break out of the scan loop.
 
 ---
 
 ### Algorithm 3 — Collision Detection
 
-```
-FUNCTION check_collision(entity, player_x, basket_width, max_y):
-    IF entity.type == SHARK:
-        IF entity.x IN [player_x - 4 .. player_x + basket_width + 4]
-           AND entity.y >= max_y - 4:
-            RETURN "shark_hit"   // instant game over
-        RETURN "no_hit"
+**Step 1:** Check if the entity is a **Shark**:
+- If `entity.x` is within 4 columns of the basket AND `entity.y >= max_y - 4` → return `shark_hit` (instant game over)
+- Otherwise → return `no_hit` and skip falling logic
 
-    IF entity.y >= max_y - 2:
-        IF entity.x >= player_x - 2
-           AND entity.x <= player_x + basket_width:
-            RETURN "caught"
-        ELSE:
-            RETURN "missed"
-    RETURN "in_flight"
-```
+**Step 2:** For all other entities, check if `entity.y >= max_y - 2` (reached basket row).
+- If **No** → entity is still in flight; continue to next frame
+
+**Step 3:** Check horizontal overlap:
+- If `entity.x >= player_x - 2` AND `entity.x <= player_x + basket_width` → return `caught`
+- Otherwise → return `missed`
+
+**Step 4:** On `caught` → apply the entity's effect (score, life change, power-up activation). Set `entity.active = 0`.
+
+**Step 5:** On `missed` → if entity was a good item (fish/starfish/gold fish), reset `combo = 0`. Show splash popup. Set `entity.active = 0`.
 
 ---
 
 ### Algorithm 4 — Combo & Score Calculation
 
-```
-FUNCTION calculate_score(entity_type, combo, multiplier_active):
-    mult = 2 IF multiplier_active ELSE 1
+**Step 1:** Determine the score multiplier: `mult = 2` if `multiplier_timer > 0`, else `mult = 1`.
 
-    SWITCH entity_type:
-        FISH:      pts = (10  + combo)     × mult
-        STARFISH:  pts = (50  + combo × 2) × mult
-        GOLD_FISH: pts = (200 + combo × 5) × mult
-        OTHER:     pts = 0
+**Step 2:** Look up base points by entity type:
+- **Fish** → `pts = (10 + combo) × mult`
+- **Starfish** → `pts = (50 + combo × 2) × mult`
+- **Gold Fish** → `pts = (200 + combo × 5) × mult`
+- **Other** → `pts = 0`
 
-    IF pts > 0:
-        combo += 1
-    RETURN pts
-```
+**Step 3:** Add `pts` to `score`.
+
+**Step 4:** If `pts > 0` (a good item was caught), increment `combo` by 1.
+
+**Step 5:** If a good item was **missed**, reset `combo = 0`.
+
+**Step 6:** Display a floating popup showing `+pts` at the entity's last position.
 
 ---
 
 ### Algorithm 5 — Level Progression
 
-```
-FUNCTION check_level_up(score, level, lives, speed, basket_speed,
-                         base_time, level_secs_left):
-    IF score >= level * 100:
-        time_bonus    = level_secs_left * 5
-        score        += time_bonus
-        level        += 1
-        lives        += 1
-        speed         = MAX(speed - 2000, 15000)
-        basket_speed += 1
-        level_time_limit = MAX(base_time - (level - 1) * 5, 15)
-        level_secs_left  = level_time_limit
-        update_environment(level)
-        user.max_level = MAX(user.max_level, level)
-        save_users()
-        DISPLAY "LEVEL UP!" flash for 40 frames
-```
+**Step 1:** After every collision, check if `score >= level * 100`.
+
+**Step 2:** If the threshold is met:
+- Calculate `time_bonus = level_secs_left * 5`
+- Add `time_bonus` to `score` and show "TIME BONUS +N!" popup
+
+**Step 3:** Increment `level` by 1. Increment `lives` by 1.
+
+**Step 4:** Increase difficulty:
+- `speed = MAX(speed - 2000, 15000)` (faster frames)
+- `basket_speed += 1`
+
+**Step 5:** Recalculate level timer:
+- `level_time_limit = MAX(base_time - (level - 1) * 5, 15)`
+- Reset `level_secs_left = level_time_limit`
+
+**Step 6:** Update biome: call `update_environment(level)` which re-initializes all 10 color pairs.
+
+**Step 7:** Update the user's profile: `user.max_level = MAX(user.max_level, level)`, then call `save_users()`.
+
+**Step 8:** Trigger "LEVEL UP!" flash animation for 40 frames.
 
 ---
 
 ### Algorithm 6 — Life Regeneration
 
-```
-FUNCTION regen_lives(user):
-    REGEN_SECS = 300     // 5 minutes
-    MAX_LIVES  = 5
+**Step 1:** Every time the Main Menu is rendered, get the current Unix timestamp: `now = time(NULL)`.
 
-    now     = current Unix timestamp
-    elapsed = now - user.last_life_regen
-    to_add  = elapsed / REGEN_SECS       // integer division
+**Step 2:** Calculate elapsed seconds since last regen: `elapsed = now - user.last_life_regen`.
 
-    IF user.stored_lives < MAX_LIVES AND to_add > 0:
-        user.stored_lives += to_add
-        IF user.stored_lives > MAX_LIVES:
-            user.stored_lives = MAX_LIVES
-        user.last_life_regen += to_add * REGEN_SECS
-        save_users()
+**Step 3:** Calculate lives to add: `to_add = elapsed / 300` (integer division; 1 life per 5 minutes).
 
-    // HUD countdown
-    secs_until_next = REGEN_SECS - (now - user.last_life_regen)
-    IF user.stored_lives >= MAX_LIVES:
-        DISPLAY "Lives full!"
-    ELSE:
-        DISPLAY "Next life in: MM:SS" using secs_until_next
-```
+**Step 4:** If `user.stored_lives < 5` AND `to_add > 0`:
+- Add `to_add` to `user.stored_lives`, capping at 5
+- Advance `user.last_life_regen += to_add * 300`
+- Call `save_users()`
+
+**Step 5:** Calculate the countdown to the next life:
+- `secs_until_next = 300 - (now - user.last_life_regen)`
+
+**Step 6:** Display in the HUD:
+- If `stored_lives >= 5` → show **"Lives full!"** in green
+- Otherwise → show **"Next life in: MM:SS"** using `secs_until_next`
 
 ---
 
